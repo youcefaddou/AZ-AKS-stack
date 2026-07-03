@@ -1,4 +1,4 @@
-# TP Cloud Computing — AKS Kubernetes B3 Ynov
+# Cloud Computing — AKS Kubernetes B3 
 
 Déploiement d'une infrastructure cloud complète sur Azure : IaC avec OpenTofu, cluster Kubernetes (AKS) avec Istio, application multi-tiers et stack d'observabilité.
 
