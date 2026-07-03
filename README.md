@@ -185,7 +185,7 @@ Déploiement d'une infrastructure cloud complète sur Azure : IaC avec OpenTofu,
 Internet
     │
     ▼
-Azure Load Balancer (IP: 172.189.23.10)
+Azure Load Balancer 
     │
     ▼
 Istio Gateway (namespace: istio-system)
