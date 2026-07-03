@@ -1,0 +1,88 @@
+route:
+  main:
+    enabled: true
+    apiVersion: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    hostnames: []
+    parentRefs:
+      - name: istio-gateway
+        namespace: istio-system
+        sectionName: web
+    matches:
+      - path:
+          type: PathPrefix
+          value: /grafana
+
+adminUser: admin
+adminPassword: admin
+
+grafana.ini:
+  server:
+    root_url: "%(protocol)s://%(domain)s/grafana"
+    serve_from_sub_path: true
+
+# Provisionne automatiquement les 3 datasources au démarrage de Grafana
+# (fichier de provisioning, pas de clic-ouistiti dans l'UI). On câble aussi
+# la corrélation entre les 3 piliers (exemplars, derived fields, traces to
+# logs/metrics) : c'est ce qui rend une stack LGTM réellement utile au
+# quotidien plutôt que 3 outils cloisonnés.
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        uid: prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus-server.monitoring.svc.cluster.local
+        isDefault: true
+        jsonData:
+          # Un exemplar exposé par une app instrumentée (ou par le
+          # metrics-generator de Tempo) devient un lien cliquable direct
+          # vers la trace correspondante dans Tempo.
+          exemplarTraceIdDestinations:
+            - datasourceUid: tempo
+              name: trace_id
+
+      - name: Loki
+        uid: loki
+        type: loki
+        access: proxy
+        url: http://loki-gateway.monitoring.svc.cluster.local
+        jsonData:
+          # Si une ligne de log contient un trace_id (propagé par l'app),
+          # Grafana affiche un bouton "Tempo" pour sauter directement à la
+          # trace associée.
+          derivedFields:
+            - datasourceUid: tempo
+              matcherRegex: '"?trace_id"?[=:]\s*"?([0-9a-f]+)"?'
+              name: TraceID
+              url: "${__value.raw}"
+
+      - name: Tempo
+        uid: tempo
+        type: tempo
+        access: proxy
+        url: http://tempo.monitoring.svc.cluster.local:3200
+        jsonData:
+          # Depuis une trace, sauter vers les logs du même moment/namespace.
+          tracesToLogsV2:
+            datasourceUid: loki
+            spanStartTimeShift: "-5m"
+            spanEndTimeShift: "5m"
+            filterByTraceID: true
+          # Depuis une trace, sauter vers le service-graph / les métriques
+          # RED générées par tempo.metricsGenerator (cf. tempo/values.yaml).
+          tracesToMetrics:
+            datasourceUid: prometheus
+          serviceMap:
+            datasourceUid: prometheus
+          nodeGraph:
+            enabled: true
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 64Mi
+  limits:
+    memory: 256Mi

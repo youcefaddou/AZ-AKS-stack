@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"><title>Livre d'or</title></head>
+<body style="font-family:sans-serif;max-width:600px;margin:40px auto">
+  <h1>📖 Livre d'or n-tier</h1>
+  <form id="f"><input id="msg" placeholder="Votre message" required><button>Ajouter</button></form>
+  <ul id="list"></ul>
+  <script>
+    function load() {
+      fetch("/api/messages").then(function(r){return r.json();})
+        .then(function(rows){
+          document.getElementById("list").innerHTML =
+            rows.map(function(m){return "<li>"+m.content+"</li>";}).join("");
+        });
+    }
+    document.getElementById("f").onsubmit = function(e){
+      e.preventDefault();
+      fetch("/api/messages",{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({content:document.getElementById("msg").value})
+      }).then(function(){document.getElementById("msg").value="";load();});
+    };
+    load();
+  </script>
+</body></html>

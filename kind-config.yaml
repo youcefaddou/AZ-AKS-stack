@@ -1,0 +1,20 @@
+# Cluster kind local mono-noeud.
+#
+# extraPortMappings expose les ports 80/443 de la machine hôte directement
+# vers des ports du conteneur "noeud" kind. On les fait pointer vers les
+# NodePorts fixes 30080/30443 du Service auto-provisionné par la Gateway
+# Istio (voir istio/mesh-config/templates/gateway.yaml : ConfigMap
+# istio-gateway-service-options). Port 443 réservé pour un futur listener
+# TLS, non utilisé pour l'instant (un seul listener HTTP "web" aujourd'hui).
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: k8s-exemple
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 80
+        protocol: TCP
+      - containerPort: 30443
+        hostPort: 443
+        protocol: TCP

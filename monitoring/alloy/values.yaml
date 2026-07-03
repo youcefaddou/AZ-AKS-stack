@@ -1,0 +1,95 @@
+# Rôle d'Alloy dans cette stack : agent de collecte de LOGS niveau noeud
+# (DaemonSet, un pod par noeud), remplaçant moderne de Promtail. Les
+# métriques restent scrapées en pull par Prometheus (kube-state-metrics,
+# node-exporter, annotations prometheus.io/scrape) et les traces
+# applicatives transitent par l'OTel Collector -> Tempo. On garde ainsi une
+# responsabilité claire par composant plutôt qu'un agent qui fait tout.
+
+alloy:
+  # Désactive l'envoi de statistiques d'usage anonymes à Grafana Labs.
+  enableReporting: false
+
+  mounts:
+    # Monte /var/log de l'hôte (kind = conteneur docker qui fait office de
+    # noeud) dans le pod Alloy. C'est là que kubelet écrit les logs de
+    # conteneurs (/var/log/pods/..., symlinké depuis /var/log/containers/).
+    varlog: true
+
+  configMap:
+    content: |-
+      // Découvre tous les pods du cluster via l'API Kubernetes (watch),
+      // avec leurs métadonnées (namespace, nom, labels, annotations...).
+      discovery.kubernetes "pods" {
+        role = "pod"
+      }
+
+      // Transforme les métadonnées Kubernetes en labels Loki, et construit
+      // le chemin des fichiers de logs de chaque conteneur sur le disque du
+      // noeud (__path__). C'est ce chemin que loki.source.file va tailer.
+      discovery.relabel "pod_logs" {
+        targets = discovery.kubernetes.pods.targets
+
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_container_name"]
+          separator     = "/"
+          target_label  = "job"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+          separator     = "/"
+          action        = "replace"
+          replacement   = "/var/log/pods/*$1/*.log"
+          target_label  = "__path__"
+        }
+      }
+
+      // Surveille les fichiers correspondant aux __path__ calculés
+      // ci-dessus et notifie loki.source.file dès qu'ils apparaissent.
+      local.file_match "pod_logs" {
+        path_targets = discovery.relabel.pod_logs.output
+      }
+
+      // Lit (tail) les fichiers de logs et les envoie au pipeline suivant.
+      loki.source.file "pod_logs" {
+        targets    = local.file_match.pod_logs.targets
+        forward_to = [loki.process.pod_logs.receiver]
+      }
+
+      // Ajoute un label statique identifiant le cluster d'origine ; utile
+      // dès qu'on a plusieurs environnements qui écrivent dans le même Loki.
+      loki.process "pod_logs" {
+        forward_to = [loki.write.default.receiver]
+
+        stage.static_labels {
+          values = {
+            cluster = "kind-k8s-exemple",
+          }
+        }
+      }
+
+      // Envoie vers le gateway Loki (nginx devant le pod singleBinary),
+      // le point d'entrée recommandé par le chart pour push ET query.
+      loki.write "default" {
+        endpoint {
+          url = "http://loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push"
+        }
+      }
+
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      memory: 128Mi

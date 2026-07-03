@@ -1,0 +1,97 @@
+# Rôle de l'OTel Collector dans cette stack : point d'entrée OTLP
+# vendor-neutral pour les applications instrumentées (et, en phase 2, pour
+# la télémétrie Envoy/Istio). Contrairement à Alloy (agent par noeud, logs
+# uniquement ici), le collector est un déploiement central qui reçoit des
+# traces/métriques/logs OTLP et les distribue vers les 3 backends. C'est ce
+# qui permet à une application de ne parler qu'un seul protocole (OTLP) sans
+# connaître Tempo/Loki/Prometheus.
+
+mode: deployment
+
+# L'image "core" (otel/opentelemetry-collector) ne contient pas les
+# exporters prometheusremotewrite/loki : il faut l'image "contrib".
+image:
+  repository: otel/opentelemetry-collector-contrib
+
+replicaCount: 1
+
+# On ne garde que les ports qu'on utilise réellement (OTLP). Les ports
+# jaeger/zipkin/hostPort du chart sont désactivés : moins de surface
+# exposée, et cohérent avec le fait qu'aucun receiver correspondant n'est
+# déclaré dans config.receivers ci-dessous.
+ports:
+  otlp:
+    enabled: true
+    hostPort: null
+  otlp-http:
+    enabled: true
+    hostPort: null
+  jaeger-compact:
+    enabled: false
+  jaeger-thrift:
+    enabled: false
+  jaeger-grpc:
+    enabled: false
+  zipkin:
+    enabled: false
+
+config:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: ${env:MY_POD_IP}:4317
+        http:
+          endpoint: ${env:MY_POD_IP}:4318
+    # Les receivers jaeger/zipkin/prometheus par défaut du chart sont
+    # retirés : on ne fait entrer que de l'OTLP dans ce pipeline.
+    jaeger: null
+    zipkin: null
+    prometheus: null
+
+  processors:
+    batch: {}
+    memory_limiter:
+      check_interval: 5s
+      limit_percentage: 80
+      spike_limit_percentage: 25
+
+  exporters:
+    # Conservé pour le debug (kubectl logs sur le pod du collector affiche
+    # les payloads reçus) ; à retirer des pipelines si trop verbeux.
+    debug:
+      verbosity: basic
+    otlp/tempo:
+      endpoint: tempo.monitoring.svc.cluster.local:4317
+      tls:
+        insecure: true
+    prometheusremotewrite:
+      endpoint: http://prometheus-server.monitoring.svc.cluster.local/api/v1/write
+    # L'exporter dédié "loki" a été retiré du collector contrib au profit de
+    # l'ingestion OTLP native de Loki (3.x+) : otlphttp poste sur
+    # <endpoint>/v1/logs, donc "/otlp" ici cible bien /otlp/v1/logs côté
+    # loki-gateway.
+    otlphttp/loki:
+      endpoint: http://loki-gateway.monitoring.svc.cluster.local/otlp
+
+  service:
+    pipelines:
+      traces:
+        receivers: [otlp]
+        processors: [memory_limiter, batch]
+        exporters: [otlp/tempo, debug]
+      metrics:
+        receivers: [otlp]
+        processors: [memory_limiter, batch]
+        exporters: [prometheusremotewrite, debug]
+      logs:
+        receivers: [otlp]
+        processors: [memory_limiter, batch]
+        exporters: [otlphttp/loki, debug]
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 64Mi
+  limits:
+    memory: 128Mi

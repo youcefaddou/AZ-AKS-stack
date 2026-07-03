@@ -1,0 +1,6 @@
+# Valeurs par défaut du chart (utilisées si on l'installe seul, hors
+# helmfile). helmfile.yaml surcharge "gateway.enabled" selon la valeur
+# d'environnement "ingress" (istio | traefik) pour éviter que la Gateway
+# Istio et Traefik ne se battent toutes les deux pour le NodePort 30080.
+gateway:
+  enabled: true

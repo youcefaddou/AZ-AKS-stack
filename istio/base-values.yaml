@@ -1,0 +1,5 @@
+# Le chart "base" installe les CRDs Istio (VirtualService, DestinationRule,
+# Telemetry, PeerAuthentication...) et les ClusterRoles/ClusterRoleBindings
+# du control plane. Rien à personnaliser ici pour un lab local : les
+# défauts du chart suffisent (enableCRDTemplates: true, istioNamespace:
+# istio-system).

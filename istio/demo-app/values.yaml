@@ -1,0 +1,5 @@
+# Valeurs par défaut (chart utilisable seul, hors helmfile). helmfile.yaml
+# surcharge ces deux valeurs selon l'ingress actif (istio | traefik), voir
+# environments dans helmfile.yaml.
+gatewayName: istio-gateway
+gatewayNamespace: istio-system

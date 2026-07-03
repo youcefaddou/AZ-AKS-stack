@@ -1,0 +1,8 @@
+apiVersion: v2
+name: mesh-config
+description: >-
+  Ressources de configuration du mesh qui n'existent pas comme charts
+  officiels : activation du tracing (Telemetry CR) et namespace de démo
+  avec injection de sidecar activée.
+type: application
+version: 0.1.0

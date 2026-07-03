@@ -1,0 +1,226 @@
+# Orchestrateur unique pour toutes les releases Helm du repo.
+#
+# Pourquoi helmfile plutôt qu'un chart "umbrella" (Chart.yaml + dependencies) :
+# chaque brique (grafana, loki, tempo, alloy, otel-collector, prometheus,
+# istio...) est versionnée et upgradée indépendamment, sans avoir à vendorer
+# des .tgz ni à bumper la version d'un chart parent à chaque changement d'une
+# sous-brique. `helmfile diff` donne aussi un aperçu (via le plugin helm-diff)
+# de ce qui va changer avant d'appliquer quoi que ce soit.
+#
+# Ingress switchable : Traefik et la Gateway API d'Istio savent tous les deux
+# jouer le rôle d'ingress (nord-sud) sur ce cluster, mais un seul à la fois
+# (ils se disputeraient le NodePort 30080). Le choix se fait via l'environment
+# helmfile :
+#   helmfile apply                 -> environment "default" = istio (déjà déployé)
+#   helmfile -e traefik apply      -> bascule sur Traefik
+#   helmfile -e istio apply        -> repasse sur Istio
+# Istio (control plane + mesh + sidecars sur le namespace demo) reste déployé
+# dans tous les cas : le switch ne concerne que qui fait l'ingress externe.
+
+environments:
+  default: &ingress-istio
+    values:
+      - ingress: istio
+        gatewayName: istio-gateway
+        gatewayNamespace: istio-system
+  istio:
+    <<: *ingress-istio
+  traefik:
+    values:
+      - ingress: traefik
+        gatewayName: traefik-gateway
+        gatewayNamespace: traefik
+---
+repositories:
+  - name: traefik
+    url: https://traefik.github.io/charts
+  - name: grafana-community
+    url: https://grafana-community.github.io/helm-charts/
+  - name: grafana
+    url: https://grafana.github.io/helm-charts
+  - name: prometheus-community
+    url: https://prometheus-community.github.io/helm-charts
+  - name: open-telemetry
+    url: https://open-telemetry.github.io/opentelemetry-helm-charts
+  - name: istio
+    url: https://istio-release.storage.googleapis.com/charts
+
+helmDefaults:
+  wait: true
+  timeout: 300
+  createNamespace: true
+  # Affiche le diff avant application, y compris pour les secrets (pas de
+  # données sensibles dans ce repo, valeurs admin/admin volontairement en
+  # clair pour un lab local, cf. monitoring/grafana/values.yaml).
+  historyMax: 5
+
+releases:
+  - name: traefik
+    namespace: traefik
+    chart: traefik/traefik
+    version: "41.0.1"
+    # Seule release réellement conditionnelle : Traefik n'est appliqué que
+    # si l'environment sélectionné a ingress=traefik (cf. section
+    # "environments" en haut de ce fichier).
+    installed: {{ eq .Values.ingress "traefik" }}
+    values:
+      - traefik/values.yaml
+    # Le Service Envoy auto-provisionné par la Gateway Istio et le Service
+    # Traefik se disputent le même NodePort 30080 : un seul peut exister à
+    # la fois. Cette dépendance garantit que istio-mesh-config (qui
+    # supprime la Gateway Istio quand ingress=traefik) a fini AVANT que
+    # Traefik n'essaie de créer son propre Service sur ce port.
+    #
+    # Dans l'autre sens (traefik -> istio), pas besoin d'une dépendance
+    # symétrique (qui créerait un cycle) : helmfile désinstalle toujours
+    # les releases installed=false avant d'appliquer le reste du graphe, donc
+    # le port est déjà libre quand istio-mesh-config recrée sa Gateway.
+    # Testé dans les deux sens avec un seul `helmfile apply`.
+    needs:
+      - istio-system/istio-mesh-config
+
+  - name: prometheus
+    namespace: monitoring
+    chart: prometheus-community/prometheus
+    version: "29.14.0"
+    values:
+      - monitoring/prometheus/values.yaml
+    hooks:
+      - events: ["prepare"]
+        showlogs: true
+        command: kubectl
+        args:
+          - apply
+          - -f
+          - https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.75.0/example/prometheus-operator-crd/monitoring.coreos.com_servicemonitors.yaml
+
+  - name: loki
+    namespace: monitoring
+    chart: grafana-community/loki
+    version: "18.3.1"
+    values:
+      - monitoring/loki/values.yaml
+
+  - name: tempo
+    namespace: monitoring
+    chart: grafana-community/tempo
+    version: "2.2.3"
+    values:
+      - monitoring/tempo/values.yaml
+    # Le metrics-generator de Tempo pousse vers Prometheus (remote_write) :
+    # inutile de bloquer l'install dessus, mais on l'ordonne pour la clarté
+    # (cf. helmfile diff / apply --interactive qui affichera cet ordre).
+    needs:
+      - monitoring/prometheus
+
+  - name: alloy
+    namespace: monitoring
+    chart: grafana/alloy
+    version: "1.10.0"
+    values:
+      - monitoring/alloy/values.yaml
+    needs:
+      - monitoring/loki
+
+  - name: otel-collector
+    namespace: monitoring
+    chart: open-telemetry/opentelemetry-collector
+    version: "0.162.0"
+    values:
+      - monitoring/otel-collector/values.yaml
+    needs:
+      - monitoring/prometheus
+      - monitoring/loki
+      - monitoring/tempo
+
+  - name: grafana
+    namespace: monitoring
+    chart: grafana-community/grafana
+    version: "12.7.2"
+    values:
+      - monitoring/grafana/values.yaml
+      # Surcharge le parentRef du HTTPRoute selon l'ingress actif (fusion de
+      # maps : seule la clé route.main.parentRefs est remplacée, le reste de
+      # monitoring/grafana/values.yaml, ex. datasources, est conservé).
+      - route:
+          main:
+            parentRefs:
+              - name: {{ .Values.gatewayName }}
+                namespace: {{ .Values.gatewayNamespace }}
+                sectionName: web
+    # Le HTTPRoute de Grafana requiert la CRD Gateway API et une Gateway déjà
+    # créée. helmfile refuse qu'on liste une dépendance vers une release non
+    # installed (elle le signale même en warning), donc on ne référence que
+    # celle qui est réellement active dans l'environment courant.
+    needs:
+{{- if eq .Values.ingress "traefik" }}
+      - traefik/traefik
+{{- else }}
+      - istio-system/istio-mesh-config
+{{- end }}
+      - monitoring/prometheus
+      - monitoring/loki
+      - monitoring/tempo
+
+  # --- Istio : control plane + mesh + sidecars Envoy ------------------------
+  # Sidecar injection classique (pas le mode "ambient"/ztunnel) : c'est ce
+  # mode qui correspond à "Istio avec Envoy" au sens historique du terme, un
+  # proxy Envoy par pod plutôt qu'un proxy par noeud. Toujours déployé, que
+  # l'ingress actif soit Istio ou Traefik : c'est le mesh (sidecars sur le
+  # namespace demo, tracing) qui compte ici, l'ingress est un rôle en plus
+  # que la Gateway API d'Istio peut jouer (cf. istio-mesh-config ci-dessous).
+
+  - name: istio-base
+    namespace: istio-system
+    chart: istio/base
+    version: "1.30.2"
+    values:
+      - istio/base-values.yaml
+    # Les CRDs Gateway API (Gateway, GatewayClass, HTTPRoute...) ne sont pas
+    # vendorées dans les charts Istio ni dans celui de Traefik. On les
+    # installe ici en presync, avant que la ressource Gateway
+    # (istio-mesh-config ou traefik) et les HTTPRoute (grafana, demo-app)
+    # plus loin dans ce fichier n'en aient besoin.
+    hooks:
+      - events: ["prepare"]
+        showlogs: true
+        command: kubectl
+        args:
+          - apply
+          - -f
+          - https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.0/standard-install.yaml
+
+  - name: istiod
+    namespace: istio-system
+    chart: istio/istiod
+    version: "1.30.2"
+    values:
+      - istio/istiod-values.yaml
+    needs:
+      - istio-system/istio-base
+
+  - name: istio-mesh-config
+    namespace: istio-system
+    chart: ./istio/mesh-config
+    values:
+      # La Gateway Istio elle-même (le rôle ingress) ne se déploie que si
+      # c'est elle l'ingress actif : sinon elle se battrait avec Traefik
+      # pour le NodePort 30080. Le Telemetry CR (tracing du mesh), lui,
+      # n'est pas concerné par ce toggle et reste toujours actif.
+      - gateway:
+          enabled: {{ eq .Values.ingress "istio" }}
+    needs:
+      - istio-system/istiod
+
+  - name: istio-demo-app
+    namespace: demo
+    chart: ./istio/demo-app
+    values:
+      - gatewayName: {{ .Values.gatewayName }}
+        gatewayNamespace: {{ .Values.gatewayNamespace }}
+    # Le namespace "demo" doit déjà exister ET porter le label
+    # istio-injection=enabled (posé par istio-mesh-config) avant que ces
+    # pods ne soient créés : l'injection ne se fait qu'à la création du
+    # pod, pas rétroactivement.
+    needs:
+      - istio-system/istio-mesh-config

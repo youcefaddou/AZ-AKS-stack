@@ -1,0 +1,41 @@
+# Génère un trafic continu et varié vers httpbin (succès, latence, erreurs)
+# pour avoir des traces réelles à observer dans Grafana sans avoir à
+# instrumenter/déployer sa propre application. Le sidecar Envoy de ce pod
+# (comme celui d'httpbin) crée automatiquement une trace par requête et
+# l'exporte vers l'OTel Collector (cf. istio/istiod/values.yaml +
+# ../mesh-config/templates/telemetry.yaml).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: load-generator
+  namespace: demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: load-generator
+  template:
+    metadata:
+      labels:
+        app: load-generator
+    spec:
+      containers:
+        - name: load-generator
+          image: curlimages/curl:8.11.1
+          command:
+            - /bin/sh
+            - -c
+            - |
+              endpoints="/get /delay/1 /status/500 /status/200"
+              while true; do
+                for ep in $endpoints; do
+                  curl -s -o /dev/null "http://httpbin:8080$ep"
+                  sleep 2
+                done
+              done
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 32Mi

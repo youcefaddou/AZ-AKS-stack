@@ -1,0 +1,9 @@
+{
+  "name": "api",
+  "version": "1.0.0",
+  "dependencies": {
+    "express": "^4",
+    "pg": "^8",
+    "prom-client": "^15"
+  }
+}

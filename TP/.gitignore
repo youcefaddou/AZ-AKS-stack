@@ -1,0 +1,8 @@
+# Clés SSH privées
+cloud-computing-tp
+
+# Fichiers locaux Terraform / OpenTofu
+.terraform/
+*.tfstate
+*.tfstate.backup
+.terraform.tfstate.lock.info

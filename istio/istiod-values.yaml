@@ -1,0 +1,47 @@
+# Control plane Istio (Pilot) : distribue la config xDS aux sidecars Envoy
+# et porte le webhook de mutation qui injecte ces sidecars.
+
+pilot:
+  # Un seul réplica suffit pour un lab local ; pas besoin d'HPA.
+  autoscaleEnabled: false
+  replicaCount: 1
+  resources:
+    requests:
+      # Le défaut du chart (500m/2048Mi) est dimensionné pour un vrai
+      # cluster ; on retaille pour un laptop, Pilot est très peu sollicité
+      # avec une poignée de sidecars.
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+meshConfig:
+  # Fusionne les métriques Envoy avec celles déjà scrapées par Prometheus
+  # sur le pod (évite un scrape_config séparé pour les proxys).
+  enablePrometheusMerge: true
+
+  # Limite Envoy à 1 thread de worker pour économiser la mémoire et le CPU
+  defaultConfig:
+    concurrency: 1
+
+  # Déclare l'OTel Collector comme fournisseur de traces pour tout le mesh.
+  # C'est ce qui répond au "brancher Istio/Envoy au collecteur OTLP" :
+  # chaque sidecar Envoy exportera ses spans en OTLP/gRPC vers le collector
+  # déjà déployé dans monitoring/otel-collector. Le Telemetry CR qui active
+  # réellement ce provider est dans ../mesh-config/templates/telemetry.yaml
+  # (l'activation et la définition du provider sont deux ressources
+  # distinctes dans l'API Istio).
+  extensionProviders:
+    - name: otel-tracing
+      opentelemetry:
+        port: 4317
+        service: otel-collector-opentelemetry-collector.monitoring.svc.cluster.local
+
+global:
+  proxy:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi

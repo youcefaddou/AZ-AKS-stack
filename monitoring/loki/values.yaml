@@ -1,0 +1,109 @@
+# Loki en mode Monolithic (= SingleBinary) : un seul pod fait ingestion,
+# stockage et requêtes. C'est le mode recommandé par Grafana pour tout ce
+# qui n'est pas un vrai besoin de scale horizontal (SimpleScalable /
+# Distributed demandent un object store S3-like + plusieurs composants).
+# Pour un cluster kind local, Monolithic + filesystem est largement
+# suffisant et beaucoup plus simple à faire fonctionner/déboguer.
+deploymentMode: Monolithic
+
+loki:
+  # Pas de multi-tenant ici : un seul "tenant" implicite (fake), donc pas
+  # besoin d'exiger le header X-Scope-OrgID sur toutes les requêtes.
+  auth_enabled: false
+
+  commonConfig:
+    # Un seul réplica -> une seule copie de chaque donnée a du sens.
+    # (Le défaut du chart est 3, pensé pour un déploiement distribué.)
+    replication_factor: 1
+
+  storage:
+    type: filesystem
+
+  # Raccourci du chart qui fournit un schemaConfig "tsdb + filesystem" prêt
+  # à l'emploi. Une vraie prod définirait explicitement son schemaConfig
+  # (versionning des schémas dans le temps), mais pour apprendre/itérer
+  # localement c'est l'option recommandée par la doc Loki elle-même.
+  useTestSchema: true
+
+  limits_config:
+    reject_old_samples: true
+    reject_old_samples_max_age: 168h
+    max_cache_freshness_per_query: 10m
+    split_queries_by_interval: 15m
+    query_timeout: 300s
+    volume_enabled: true
+    # Alloy tague chaque flux de logs avec pas mal de labels k8s
+    # (namespace/pod/container/node...). On relève la limite par défaut
+    # (15) pour ne pas se faire rejeter des logs en environnement de démo.
+    max_label_names_per_series: 30
+
+# Le chart active par défaut les composants du mode SimpleScalable (read/
+# write/backend, 3 réplicas chacun) même quand deploymentMode=Monolithic.
+# Il faut donc explicitement les mettre à 0 réplicas, sinon le chart refuse
+# de rendre les templates ("more than zero replicas configured for both the
+# monolithic and simple scalable targets").
+read:
+  replicas: 0
+write:
+  replicas: 0
+backend:
+  replicas: 0
+
+singleBinary:
+  replicas: 1
+  # Sidecar qui recharge les règles d'alerting Loki depuis des ConfigMaps
+  # labellisées. On n'utilise pas l'alerting Loki dans ce lab : un
+  # container (et quelques dizaines de Mo) en moins pour rien.
+  sidecar: false
+  persistence:
+    enabled: true
+    size: 5Gi
+  # Petit gabarit de ressources adapté à un laptop plutôt qu'aux défauts
+  # (souvent non définis / pensés pour un vrai cluster).
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+# minio (object storage S3-like) n'est utile qu'en storage.type=s3 ; comme
+# on est en filesystem, on n'en a pas besoin (défaut du chart: false).
+minio:
+  enabled: false
+
+# Le loki-canary envoie et vérifie en continu des logs synthétiques pour
+# surveiller la disponibilité de Loki. Utile en prod, superflu pour ce lab.
+lokiCanary:
+  enabled: false
+test:
+  enabled: false
+
+chunksCache:
+  enabled: false
+
+resultsCache:
+  enabled: false
+
+gateway:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 64Mi
+  metrics:
+    # Sidecar d'export de métriques nginx (access-log-exporter) : personne
+    # ne le scrape dans ce lab (pas de ServiceMonitor dédié), autant ne
+    # pas le démarrer.
+    enabled: false
+  # Le chart met par défaut une hard pod anti-affinity (une seule instance
+  # gateway par noeud). Avec replicas=1 sur un cluster à 1 noeud, un
+  # RollingUpdate reste bloqué indéfiniment : le nouveau pod ne peut jamais
+  # se placer tant que l'ancien tourne encore sur l'unique noeud
+  # disponible. Recreate (arrêter l'ancien avant de démarrer le nouveau)
+  # évite le deadlock ; le court instant d'indisponibilité du gateway est
+  # sans conséquence pour un lab.
+  deploymentStrategy:
+    type: Recreate
+

@@ -1,0 +1,18 @@
+# Active le tracing pour tout le mesh en utilisant le provider "otel-tracing"
+# déclaré dans istiod/values.yaml (meshConfig.extensionProviders). Sans ce
+# CR, le provider existe mais n'est utilisé par aucun sidecar : déclarer le
+# provider et l'activer sont deux étapes séparées dans l'API Istio.
+#
+# 100% de sampling : volontairement à fond pour un lab local où on veut
+# TOUT voir. En prod, on descendrait à 1-5% pour ne pas noyer Tempo/le
+# réseau sous le volume de traces.
+apiVersion: telemetry.istio.io/v1
+kind: Telemetry
+metadata:
+  name: mesh-default-tracing
+  namespace: istio-system
+spec:
+  tracing:
+    - providers:
+        - name: otel-tracing
+      randomSamplingPercentage: 100

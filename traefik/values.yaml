@@ -1,0 +1,53 @@
+# values.yaml
+#
+# Cluster cible : kind (voir ../kind-config.yaml). kind ne fournit pas de
+# controller de LoadBalancer cloud, donc un Service type=LoadBalancer resterait
+# indéfiniment en <pending>. On expose donc Traefik en NodePort sur des ports
+# fixes (30080/30443) — les mêmes que ceux utilisés par la Gateway Istio quand
+# c'est elle qui est active (cf. helmfile.yaml, environments) — et kind mappe
+# hostPort 80/443 -> ces NodePorts (voir extraPortMappings dans
+# ../kind-config.yaml). Résultat : http://dashboard.localhost et
+# http://monitoring.localhost fonctionnent directement sur le port 80 de la
+# machine hôte, sans LoadBalancer ni port-forward, quel que soit l'ingress
+# actif.
+
+ingressRoute:
+  dashboard:
+    enabled: true
+    matchRule: Host(`dashboard.localhost`)
+    entryPoints:
+      - web
+
+deployment:
+  kind: DaemonSet
+  replicas: 1
+
+# Depuis la v41 du chart, le type de Service se fixe via service.spec (objet
+# libre fusionné sur le .spec du Service), pas service.type (qui n'existe
+# plus et serait silencieusement ignoré sans erreur).
+service:
+  spec:
+    type: NodePort
+
+ports:
+  web:
+    nodePort: 30080
+  websecure:
+    nodePort: 30443
+
+providers:
+  kubernetesGateway:
+    enabled: true
+
+gateway:
+  listeners:
+    web:
+      namespacePolicy:
+        from: All
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 64Mi
+  limits:
+    memory: 128Mi

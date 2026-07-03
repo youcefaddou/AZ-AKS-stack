@@ -1,0 +1,42 @@
+# httpbin : petit serveur HTTP de test qui expose des routes utiles pour
+# générer des cas variés (latence /delay, erreurs /status, écho /get).
+# C'est le "service B" du mesh, appelé par load-generator ci-dessous.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: httpbin
+  namespace: demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: httpbin
+  template:
+    metadata:
+      labels:
+        app: httpbin
+    spec:
+      containers:
+        - name: httpbin
+          image: mccutchen/go-httpbin:v2.15.0
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: httpbin
+  namespace: demo
+spec:
+  selector:
+    app: httpbin
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http

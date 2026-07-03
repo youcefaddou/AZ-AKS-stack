@@ -1,0 +1,59 @@
+# Tempo "single binary" (pas tempo-distributed) : même logique que Loki
+# Monolithic, un seul pod pour ingestion/stockage/requêtes des traces.
+# Le stockage backend "local" (défaut du chart) écrit sur le disque du pod
+# via un PVC, pas besoin de S3/minio pour ce lab.
+
+tempo:
+  # Ne pas envoyer de stats d'usage anonymes à Grafana Labs.
+  reportingEnabled: false
+
+  # Rétention courte, cohérente avec Loki/Prometheus (cf. leurs values.yaml)
+  # pour ne pas remplir le disque sur un cluster de démo.
+  retention: 24h
+
+  # Le receiver OTLP (gRPC 4317 / HTTP 4318) est déjà activé par défaut :
+  # c'est ce qui permet à l'OTel Collector de pousser les traces ici.
+  # On peut donc laisser tempo.receivers tel quel.
+
+  # Le "metrics-generator" dérive des métriques RED (taux/erreurs/durée) et
+  # un service-graph directement à partir des traces reçues, puis les pousse
+  # vers Prometheus. C'est ce qui permet, dans Grafana, de faire du
+  # "traces -> métriques" sans instrumenter davantage les apps : bon exemple
+  # pédagogique du lien entre les 3 piliers observabilité.
+  metricsGenerator:
+    enabled: true
+    remoteWriteUrl: "http://prometheus-server.monitoring.svc.cluster.local/api/v1/write"
+    processor:
+      service_graphs:
+        wait: 10s
+        max_items: 10000
+      span_metrics:
+        enable_target_info: true
+      # Sans ce processeur, l'onglet "metrics" de l'explorateur de traces
+      # Grafana (requêtes TraceQL du type "{...} | rate()") échoue avec
+      # "localblocks processor not found" : Grafana l'appelle par défaut dès
+      # qu'on ouvre Explore > Tempo, même juste pour chercher une trace.
+      local_blocks:
+        flush_to_storage: true
+  overrides:
+    defaults:
+      metrics_generator:
+        processors:
+          - service-graphs
+          - span-metrics
+          - local-blocks
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      # Le processeur local_blocks garde des blocks de traces en mémoire
+      # avant flush (nécessaire pour les requêtes TraceQL metrics de
+      # Grafana Explore, cf. le fix appliqué plus haut) : 512Mi s'est déjà
+      # fait OOMKiller une fois en usage réel avec le trafic de démo.
+      memory: 1Gi
+
+persistence:
+  enabled: true
+  size: 5Gi

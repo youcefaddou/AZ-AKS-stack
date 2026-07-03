@@ -1,0 +1,8 @@
+apiVersion: v2
+name: demo-app
+description: >-
+  Deux petits services (httpbin + un générateur de trafic) dans le
+  namespace demo (mesh Istio) pour produire du trafic réel et valider que
+  les traces des sidecars Envoy remontent bien jusqu'à Tempo.
+type: application
+version: 0.1.0

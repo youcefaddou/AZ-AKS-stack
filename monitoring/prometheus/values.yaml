@@ -1,0 +1,80 @@
+# Prometheus reste le backend de métriques (pull model). On le garde tel
+# quel plutôt que de le remplacer par Mimir : c'est le choix le plus simple
+# pour un usage local/éducatif, et il sait déjà scraper le cluster via ses
+# scrape_configs par défaut (annotations prometheus.io/scrape sur les pods,
+# kube-state-metrics, node-exporter...).
+
+alertmanager:
+  enabled: false
+
+kube-state-metrics:
+  enabled: false
+
+prometheus-node-exporter:
+  enabled: true
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      memory: 64Mi
+
+prometheus-pushgateway:
+  enabled: false
+
+server:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+  global:
+    scrape_interval: 30s
+    evaluation_interval: 30s
+
+  retention: 6h
+  persistentVolume:
+    enabled: false
+
+  extraFlags:
+    - web.enable-lifecycle
+    - web.enable-remote-write-receiver
+
+  # Scrape direct du pod backend sur port 3000 (contourne les annotations Istio)
+  extraScrapeConfigs: |
+    - job_name: 'backend'
+      kubernetes_sd_configs:
+        - role: pod
+          namespaces:
+            names:
+              - demo
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_app]
+          action: keep
+          regex: backend
+        - source_labels: [__meta_kubernetes_pod_container_port_number]
+          action: keep
+          regex: "3000"
+        - source_labels: [__meta_kubernetes_pod_ip]
+          target_label: __address__
+          replacement: $1:3000
+        - target_label: __metrics_path__
+          replacement: /metrics
+        - source_labels: [__meta_kubernetes_namespace]
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          target_label: pod
+
+configmapReload:
+  prometheus:
+    # Sidecar qui recharge Prometheus à chaud quand le ConfigMap de config
+    # change (sinon il faudrait redémarrer le pod à chaque changement).
+    # Minuscule mais sans requests par défaut dans le chart.
+    resources:
+      requests:
+        cpu: 5m
+        memory: 16Mi
+      limits:
+        memory: 32Mi

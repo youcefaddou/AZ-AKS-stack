@@ -1,0 +1,12 @@
+# Namespace dédié à l'application de démo (../demo-app). Le label
+# istio-injection=enabled est ce qui déclenche l'injection automatique du
+# sidecar Envoy sur tout Pod créé dans ce namespace (webhook mutant
+# d'istiod). Les namespaces existants de ce repo (traefik, monitoring) ne
+# sont volontairement PAS labellisés : on garde le plan d'infrastructure
+# hors mesh pour ne pas complexifier ce qui tourne déjà.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+  labels:
+    istio-injection: enabled
