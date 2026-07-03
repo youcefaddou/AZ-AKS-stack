@@ -8,10 +8,10 @@ Déploiement d'une infrastructure cloud complète sur Azure : IaC avec OpenTofu,
 Internet
     │
     ▼
-Azure Load Balancer (IP: 4.251.168.158)
+Azure Load Balancer (provisionné automatiquement par AKS)
     │
     ▼
-Istio Gateway (namespace: istio-system)
+Istio Gateway Pod — Service LoadBalancer (IP: 4.251.168.158, namespace: istio-system)
     │
     ├── /            → Frontend (nginx, namespace: demo)
     ├── /api         → Backend Node.js (namespace: demo)
