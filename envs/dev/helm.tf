@@ -33,7 +33,7 @@ resource "terraform_data" "gateway_api_crds" {
   triggers_replace = [module.aks.cluster_name]
 
   provisioner "local-exec" {
-    command = "kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.0/standard-install.yaml"
+    command = "kubectl apply --validate=false -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.0/standard-install.yaml"
   }
 
   depends_on = [module.aks]
@@ -45,7 +45,7 @@ resource "terraform_data" "servicemonitor_crd" {
   triggers_replace = [module.aks.cluster_name]
 
   provisioner "local-exec" {
-    command = "kubectl apply -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.75.0/example/prometheus-operator-crd/monitoring.coreos.com_servicemonitors.yaml"
+    command = "kubectl apply --validate=false -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.75.0/example/prometheus-operator-crd/monitoring.coreos.com_servicemonitors.yaml"
   }
 
   depends_on = [module.aks]
@@ -209,12 +209,12 @@ resource "helm_release" "grafana" {
   ]
 }
 
-# --- Application demo ---------------------------------------
+# --- Application TP (Frontend + Backend + PostgreSQL + HTTPRoutes) -----------
 
-resource "helm_release" "istio_demo_app" {
-  name             = "istio-demo-app"
+resource "helm_release" "tp_app" {
+  name             = "tp-app"
   namespace        = kubernetes_namespace.demo.metadata[0].name
-  chart            = "${path.module}/../../istio/demo-app"
+  chart            = "${path.module}/../../tp-app"
   create_namespace = false
 
   set {

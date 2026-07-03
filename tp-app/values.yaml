@@ -1,0 +1,11 @@
+namespace: demo
+
+gatewayName: istio-gateway
+gatewayNamespace: istio-system
+
+backend:
+  image: ghcr.io/youcefaddou/tp-backend:latest
+  dbPassword: changeme
+
+postgres:
+  password: changeme
